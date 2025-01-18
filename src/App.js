@@ -88,7 +88,7 @@ function App() {
         console.log("response to searchTheIndex in frontend is:", response);
         const responseText = response.text;
         console.log("responseText is:", responseText);
-        setResponse(responseText);
+        setResponse(/*responseText*/ responseText);
       }
     }
     //searchTheIndex(query);

@@ -39,8 +39,10 @@ export async function sendToSearchTheIndex(query) {
     console.log("response is:", response);
     const responseJsoned = await response.json();
     console.log("responseJsoned is:", responseJsoned);
+
     //const responseJsonedText = responseJsoned.text;
     //console.log("responseJsoned.text is:", responseJsonedText);
+    //return response;
     return responseJsoned;
 
 }
