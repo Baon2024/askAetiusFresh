@@ -1,7 +1,10 @@
 import logo from './logo.svg';
 import './App.css';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
+import isEqual from 'lodash.isequal';
+import _ from 'lodash';
+
 //import { generateVectors } from './rag.js';
 //const generateVectors = require('./rag')
 import { sendToGenerateVectors, sendToSearchTheIndex } from './apiFunctions';
@@ -27,6 +30,8 @@ function App() {
 
   const [existingData, setExistingData] = useState([])
 
+  const prevExistingDataRef = useRef();
+
   useEffect(() => {
     async function getData() {
       const { data: existingData } = await supabase.from('dataForRAG').select()
@@ -38,7 +43,28 @@ function App() {
     }
 
     getData()
-  }, [])
+  }, [newText])
+
+  /*useEffect(() => {
+    // On mount, store the initial existingData in the ref
+    prevExistingDataRef.current = existingData;
+  }, [existingData]); // Runs every time existingData changes*/
+
+  useEffect(() => {
+    // Detect changes before updating the ref
+    const hasChanged = hasExistingDataChanged();
+    console.log("Data has changed:", hasChanged);
+  
+    // After detecting changes, update the ref
+    /*if (hasChanged) {
+    prevExistingDataRef.current = existingData;
+    console.log("Updated prevExistingDataRef:", prevExistingDataRef.current);
+    }*/
+  }, [existingData]);
+
+  function updatePrevExistingData() {
+    prevExistingDataRef.current = existingData;
+  }
 
   useEffect(() => {
     console.log("value of data is:", existingData);
@@ -46,6 +72,7 @@ function App() {
 
   useEffect(() => {
     console.log("value of indexName is:", indexName);
+    console.log("vaklye of prevExistingDataRef is:", prevExistingDataRef);
   },[indexName])
   
   
@@ -76,12 +103,44 @@ function App() {
     setNewText('');
   }
 
+  // New deep comparison check function
+  /*const hasExistingDataChanged = () => {
+    const prevData = prevExistingDataRef.current;
+    return !isEqual(prevData, existingData); // Check deep equality with lodash
+  };*/
+
+  const hasExistingDataChanged = () => {
+    const prevData = prevExistingDataRef.current || []; // Ensure it's always an array
+  const currentData = existingData || []; // Ensure it's always an array
+  
+    
+
+      if (prevData.length !== existingData.length) {
+        console.log("Array lengths are different:", prevData.length, existingData.length);
+        return true; // Data has changed
+      }
+    
+  
+    // Return true if the data has changed
+  };
+
+
   async function handleRAG() {
 
     //will need some condition, to decide whether indexName is different, and therefore if need to create new index
+    console.log("existing data is:", existingData);
 
+    if (indexName && existingData && query) {
 
-    if (indexName && existingData) {
+      const existingDataChanged = hasExistingDataChanged();
+      console.log("hasExistingDataChanged before dynamic function is:", hasExistingDataChanged);
+      console.log("prevEistingData ref in handleRAG function is:", prevExistingDataRef);
+      console.log("existingData in handleRAG function is:", existingData);
+
+      //really, need to make sendToGenerateVectors optional, only if existingData has changed
+      //blocking out the line below, and conditional triggering of sendToSearchTheIndex, allows me to search straight away
+      //so just need a way to make it conditional on whether existingData has changed
+      if (existingDataChanged) {
       const response = await sendToGenerateVectors(existingData);
       if (response.ok === true && query) {
         const response = await sendToSearchTheIndex(query)
@@ -89,7 +148,15 @@ function App() {
         const responseText = response.text;
         console.log("responseText is:", responseText);
         setResponse(/*responseText*/ responseText);
+        updatePrevExistingData();
       }
+    } else {
+      const searchResponse = await sendToSearchTheIndex(query);
+        console.log("response to searchTheIndex in frontend is:", searchResponse);
+        const responseText = searchResponse.text;
+        console.log("responseText is:", responseText);
+        setResponse(responseText);
+    }
     }
     //searchTheIndex(query);
 
@@ -124,12 +191,12 @@ function App() {
         {indexName && (
           <p>{indexName}</p>
         )}
-        {existingData && existingData.map((dat) => (
+        {/*{existingData && existingData.map((dat) => (
           <>
             <p>{dat.id}</p>
             <p>{dat.text}</p>
           </>
-        ))}
+        ))}*/}
          
       </div>
     </div>

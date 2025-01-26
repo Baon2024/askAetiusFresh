@@ -193,7 +193,7 @@ async function searchTheIndex(query) {
       
       // Search the index for the three most similar vectors
       const queryResponse = await index.namespace("example-namespace").query({
-        topK: 5,
+        topK: 10,
         vector: queryEmbedding[0].values,
         includeValues: false,
         includeMetadata: true
