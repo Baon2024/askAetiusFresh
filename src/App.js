@@ -1,9 +1,9 @@
 import logo from './logo.svg';
 import './App.css';
 import { useState, useEffect, useRef } from 'react';
-import { supabase } from './supabase';
-import isEqual from 'lodash.isequal';
-import _ from 'lodash';
+//import { supabase } from './supabase';
+//import isEqual from 'lodash.isequal';
+//import _ from 'lodash';
 
 //import { generateVectors } from './rag.js';
 //const generateVectors = require('./rag')
@@ -31,6 +31,7 @@ function App() {
   const [ error, setError ] = useState('');
   const [loading, setLoading] = useState(false); // State to show a loading spinner
   const [ folderUploadText, setFolderUploadText ] = useState([]);
+  const [ folderUpload, setFolderUpload ] = useState(false);
 
   const [existingData, setExistingData] = useState([])
 
@@ -150,7 +151,7 @@ function App() {
       //so just need a way to make it conditional on whether existingData has changed
       if (existingDataChanged) {
         console.log("will re/generate vectors, because data has changed");
-        const response = await sendToGenerateVectors(existingData);
+        const response = await sendToGenerateVectors(/*existingData*/ folderUploadText);
       if (response.ok === true && query) {
         const response = await sendToSearchTheIndex(query)
         console.log("response to searchTheIndex in frontend is:", response);
@@ -171,6 +172,18 @@ function App() {
     //searchTheIndex(query);
 
 
+  }
+
+  async function searchIndexDirectly() {
+
+    if (query) {
+      console.log("existing data is:", existingData);
+    const searchResponse = await sendToSearchTheIndex(query);
+        console.log("response to searchTheIndex in frontend is:", searchResponse);
+        const responseText = searchResponse.text;
+        console.log("responseText is:", responseText);
+        setResponse(responseText);
+    }
   }
 
   async function handleFolderUpload(e) {
@@ -205,6 +218,7 @@ function App() {
 
       // Update the translated text state
       setFolderUploadText(data || "Translation successful. Check backend for full results.");
+      setFolderUpload(true);
       //setExistingData(data);
     } catch (err) {
       setError("Failed to translate the PDFs. Please try again.");
@@ -235,11 +249,12 @@ function App() {
           multiple // Allow multiple files to be selected
           onChange={handleFileChange}
         />
-        <button onClick={handleFolderUpload}>{loading ? "uploading..." : "upload"}</button>
+        <button onClick={handleFolderUpload}>{loading ? "uploading...": folderUpload ? "uploaded": "upload"}</button>
         <h3>add Query</h3>
         <label>enter query</label>
         <input value={query} onChange={(e) => setQuery(e.target.value)} />
-        <button onClick={handleRAG}>search</button>
+        <button disabled={!folderUpload} onClick={handleRAG}>search</button>
+        <button disabled={!folderUpload} onClick={searchIndexDirectly}>search directly</button>
         {/*{folderUploadText.length > 0 && folderUploadText.map((item) => (
           <p>{item.text}</p> 
         ))}*/}

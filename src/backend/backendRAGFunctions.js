@@ -16,7 +16,7 @@ const pc = new Pinecone({
     apiKey: apiKey  // Replace with your OpenAI API key
   });
 
-  const indexName = 'phd4';
+  const indexName = 'ampleforth';
 
 index = pc.Index(indexName);
 
@@ -29,29 +29,16 @@ async function generateVectors(data) {
     // Convert the text into numerical vectors that Pinecone can index
 const model = 'multilingual-e5-large';
 
+const indexName = 'ampleforth';
+
+index = pc.Index(indexName);
+
 
 console.log("this is what data looks like:", data);
 
-/*const embeddings = await pc.inference.embed(
-  model,
-  data.map(d => d.text),
-  { inputType: 'passage', truncate: 'END' }
-);
+//need to chunk text so that it isn't grouped into pdfs, but as genuinely seperate chunks
 
-console.log(embeddings);
 
-const records = data.map((d, i) => ({
-    id: d.id,
-    values: embeddings[i].values,
-    metadata: { text: d.text }
-  }));
-  
-  // Upsert the vectors into the index
-  await index.namespace('example-namespace').upsert(records);
-
-  const stats = await index.describeIndexStats();
-
-  console.log("these are the stats:", stats);*/
 
   //////UPDATED BATCH VERSPON TO REMOVE SIZE CONTRAINT
   function tokenizeAndChunk(inputText, chunkSize) {
@@ -86,7 +73,10 @@ const records = data.map((d, i) => ({
   // Prepare embeddings
   const embeddings = [];
 
+  ////////////////////////////STOPPING HERE
+
   // Helper function to create batches with token and byte size checks
+  
   function createBatches(data, maxTokensPerRequest, maxBatchSizeBytes) {
       let currentBatch = [];
       let currentBatchTokenCount = 0;
@@ -106,14 +96,14 @@ const records = data.map((d, i) => ({
 
               // Check if adding this chunk exceeds the max token count or byte size
               if (currentBatchTokenCount + chunkTokenCount <= maxTokensPerRequest && currentBatchByteSize + chunkByteSize <= maxBatchSizeBytes) {
-                  currentBatch.push({ text: chunk, id: data[i].id });
+                  currentBatch.push({ text: chunk, id: `doc${i}-chunk-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`/*.id*/ });
                   currentBatchTokenCount += chunkTokenCount;
                   currentBatchByteSize += chunkByteSize;
               } else {
                   // If the batch exceeds limits, push the current batch and start a new one
                   batches.push(currentBatch);
                   console.log(`Batch pushed with ${currentBatch.length} chunks. Batch Token Count: ${currentBatchTokenCount}, Batch Byte Size: ${currentBatchByteSize}`);
-                  currentBatch = [{ text: chunk, id: data[i].id }];
+                  currentBatch = [{ text: chunk, id: `doc${i}-chunk-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`/*.id*/ }];
                   currentBatchTokenCount = chunkTokenCount;
                   currentBatchByteSize = chunkByteSize;
               }
@@ -137,6 +127,7 @@ const records = data.map((d, i) => ({
   try {
       for (const batch of batches) {
           const batchText = batch.map(chunk => chunk.text);  // Get all texts in the batch
+          console.log("batchtext for this batch:", batch);
 
           // Logging the batch size and the number of chunks before making the embedding request
           console.log(`Processing batch with ${batch.length} chunks. Total token count: ${batchText.join(' ').split(' ').length}`);
@@ -145,23 +136,56 @@ const records = data.map((d, i) => ({
           const batchEmbeddings = await pc.inference.embed(
               model,
               batchText,
-              { inputType: 'passage', truncate: 'END' }
+              { inputType: 'passage', truncate: 'NONE' }
           );
 
+          console.log("batchEmbeddings are:", batchEmbeddings);
+
+
+          //need each chunk to have unique id, not shared id from pdf
+          //and not grouped under pdfs
           // Store the embeddings and their associated metadata
           batch.forEach((chunk, i) => {
               embeddings.push({
-                  id: chunk.id,
+                  id: chunk.id, //`${chunk.id}_chunk${i}`, // Ensure each chunk has a unique ID
                   values: batchEmbeddings[i].values,
                   metadata: { text: chunk.text }
               });
           });
 
+          console.log("embeddings after each batch push:", embeddings);
+
           console.log(`Batch processed with ${batch.length} chunks`);
       }
 
+      
+      
       // Upsert the vectors into Pinecone
-      await index.namespace('example-namespace').upsert(embeddings);
+
+      console.log("Type of embeddings:", typeof embeddings);
+console.log("Is embeddings an array?", Array.isArray(embeddings));
+console.log("Embeddings data:", JSON.stringify(embeddings, null, 2));
+     
+  const before = await index.describeIndexStats();
+  console.log("index details before upsert:", before);
+
+  try {
+    // Ensure embeddings is an array of objects
+    if (Array.isArray(embeddings)) {
+        
+        for (const embed of embeddings) {
+          await index.namespace('example-namespace').upsert([embed]);
+        }
+    } else {
+        console.error("Expected 'embeddings' to be an array, but got:", embeddings);
+    }
+  } catch (error) {
+    console.error("Error upserting to Pinecone:", error);
+  }
+
+      //await index.namespace('example-namespace').upsert(embeddings);
+      //await index.namespace('ampleforth').upsert({ vectors: embeddings });
+
 
       // Get index stats after upsert
       const stats = await index.describeIndexStats();
@@ -177,7 +201,7 @@ const records = data.map((d, i) => ({
 async function searchTheIndex(query) {
 
     const model = 'multilingual-e5-large';
-    const modelMaxTokens = 4000; // Cohere's max tokens limit, change or remove this dynamic calculation if causes problems
+    const modelMaxTokens = 8192; // Cohere's max tokens limit, change or remove this dynamic calculation if causes problems
     
 
 // Helper function to count tokens in a text (example implementation)
@@ -187,10 +211,7 @@ function countTokens(text) {
   return text.split(/\s+/).length;
 }
 
-    /*const query = [
-        'can you provide a general overview of Apple inc?',
-      ];*/
-      
+   
       // Convert the query into a numerical vector that Pinecone can search with
       const queryEmbedding = await pc.inference.embed(
         model,
@@ -221,6 +242,8 @@ function countTokens(text) {
 
     // Step 2: Extract relevant metadata (text) from the matches
     const relevantTexts = matches.map(match => match.metadata.text).join("\n");
+    console.log("Top Retrieved Chunks:", matches.map(m => m.metadata.text));
+
 
     // Step 3: Combine the relevant texts and query for the language model
    
@@ -253,6 +276,7 @@ function countTokens(text) {
       
       console.log('Generated Answer:', response.text);
       return response;
+   
 }
 
 

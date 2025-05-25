@@ -34,7 +34,7 @@ const pc = new Pinecone({
   });
 
 
-const indexName = 'phd4';
+const indexName = 'ampleforth';
 
 index = pc.Index(indexName);
 
@@ -58,10 +58,13 @@ app.post('/convert-folderpdfs-text', upload.any(), async (req, res, next) => {
 
       // Extract text from the PDF
       const pdfText = await pdfParse(pdfBuffer);
-      const vectorId = `vec${i}`;
+      //const vectorId = `vec${i}`;
+
+      //this is the bit where it's going wrong, by assigning a id by pdf
+      //when id needs to be for each chunk (or not at all??)
 
       // Format the data
-      const dataToAdd = { id: vectorId, text: pdfText.text };
+      const dataToAdd = { /*id: vectorId,*/ text: pdfText.text };
       processedData.push(dataToAdd);
 
       console.log("processed data before being returned form backend is:", processedData);
@@ -87,6 +90,7 @@ app.post('/generateVectors', async (req, res, next) => {
     //console.log("req.body is:", req.body);
     
     const data = req.body;
+    console.log("data at generateVectors endpoint is:", data);
     
     const response = await generateVectors(data);
     console.log("response is:", response);
@@ -103,7 +107,7 @@ app.post('/searchTheIndex', async (req, res, next) => {
 
     //const query = req.body.query;
     const query = [data.query];
-    console.log("alternative query in backend is:", query);
+    console.log("query in backend is:", query);
 
     
     const response = await searchTheIndex(query);
