@@ -5,6 +5,9 @@ const apiKey = process.env.OPENAI_API_KEY;
 const apiKeyPC = process.env.PC_API_KEY
 require('dotenv').config();
 const natural = require('natural');
+const GPTTokenizer = require('gpt-tokenizer'); // not { encode }!
+
+
 
 const pc = new Pinecone({
     apiKey: apiKeyPC
@@ -55,10 +58,10 @@ console.log("this is what data looks like:", data);
         return [];
     }
 
-
+    const overlap = 25  //must be smaller than chunksize - could make this a percentage of chunksize
     // Create chunks by grouping tokens
     const chunks = [];
-    for (let i = 0; i < tokens.length; i += chunkSize) {
+    for (let i = 0; i < tokens.length; i += (chunkSize - overlap)) {
         chunks.push(tokens.slice(i, i + chunkSize).join(' '));  // Join the tokens back into a string
     }
     
@@ -123,7 +126,7 @@ console.log("this is what data looks like:", data);
   const batches = createBatches(data, maxTokensPerRequest, maxBatchSizeBytes);
 
 
-     // Process each batch
+  //BATCH UPSERT
   try {
       for (const batch of batches) {
           const batchText = batch.map(chunk => chunk.text);  // Get all texts in the batch
@@ -173,9 +176,15 @@ console.log("Embeddings data:", JSON.stringify(embeddings, null, 2));
     // Ensure embeddings is an array of objects
     if (Array.isArray(embeddings)) {
         
-        for (const embed of embeddings) {
+      //replace upserting one embedding at a time, with 100 at a time
+        for (let x = 0; x < embeddings.length; x += 100) {
+          const currentEmbed = embeddings.slice(x, x + 100);
+          await index.namespace('example-namespace').upsert(currentEmbed) //should be faster
+        }  
+
+        /*for (const embed of embeddings) {
           await index.namespace('example-namespace').upsert([embed]);
-        }
+        }*/
     } else {
         console.error("Expected 'embeddings' to be an array, but got:", embeddings);
     }
@@ -210,6 +219,15 @@ function countTokens(text) {
   // For better precision, you might want to use a library like `gpt-tokenizer` for accurate token counting.
   return text.split(/\s+/).length;
 }
+//const tokenizer = await GPTTokenizer.getEncoding(); 
+
+/*async function countTokens(text) {
+  return tokenizer.encode(text).length;
+}*/
+
+
+//introduce streaming updated
+//passThrough.write("Update: About to search vector database ")
 
    
       // Convert the query into a numerical vector that Pinecone can search with
