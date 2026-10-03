@@ -1,4 +1,3 @@
-import logo from './logo.svg';
 import './App.css';
 import { useState, useEffect, useRef } from 'react';
 //import { supabase } from './supabase';
@@ -7,7 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 
 //import { generateVectors } from './rag.js';
 //const generateVectors = require('./rag')
-import { sendToGenerateVectors, sendToSearchTheIndex } from './apiFunctions';
+import { sendToSearchTheIndex } from './apiFunctions';
 
 /*const data = [
   {"id": "vec1", "text": "Apple is a popular fruit known for its sweetness and crisp texture."},
@@ -29,9 +28,11 @@ function App() {
   const [ query, setQuery ] = useState('');
   const [ folderFiles, setFolderFiles ] = useState(null);
   const [ error, setError ] = useState('');
-  const [loading, setLoading] = useState(false); // State to show a loading spinner
   const [ folderUploadText, setFolderUploadText ] = useState([]);
   const [ folderUpload, setFolderUpload ] = useState(false);
+  const [ loading, setLoading ] = useState(false);
+  const [ uploadProgress, setUploadProgress ] = useState(null);
+  const [ uploadProgressMessage, setUploadProgressMessage ] = useState('');
 
   const [existingData, setExistingData] = useState([])
 
@@ -134,66 +135,39 @@ function App() {
   };
 
 
-  async function handleRAG() {
-
-    //will need some condition, to decide whether indexName is different, and therefore if need to create new index
-    console.log("existing data is:", existingData);
-
-    if (/*indexName && existingData &&*/ query) {
-
-      const existingDataChanged = hasExistingDataChanged();
-      console.log("hasExistingDataChanged before dynamic function is:", existingDataChanged);
-      console.log("prevEistingData ref in handleRAG function is:", prevExistingDataRef);
-      console.log("existingData in handleRAG function is:", existingData);
-
-      //really, need to make sendToGenerateVectors optional, only if existingData has changed
-      //blocking out the line below, and conditional triggering of sendToSearchTheIndex, allows me to search straight away
-      //so just need a way to make it conditional on whether existingData has changed
-      if (existingDataChanged) {
-        console.log("will re/generate vectors, because data has changed");
-        const response = await sendToGenerateVectors(/*existingData*/ folderUploadText);
-      if (response.ok === true && query) {
-        const response = await sendToSearchTheIndex(query)
-        console.log("response to searchTheIndex in frontend is:", response);
-        const responseText = response.text;
-        console.log("responseText is:", responseText);
-        setResponse(/*responseText*/ responseText);
-        updatePrevExistingData();
-      }
-      } else {
-        console.log("data hasn't changed, calling sendToSearchTheIndex");
-      const searchResponse = await sendToSearchTheIndex(query);
-        console.log("response to searchTheIndex in frontend is:", searchResponse);
-        const responseText = searchResponse.text;
-        console.log("responseText is:", responseText);
-        setResponse(responseText);
-      }
-    }
-    //searchTheIndex(query);
-
-
-  }
+  
 
   async function searchIndexDirectly() {
 
+    setError('');
     if (query) {
-      console.log("existing data is:", existingData);
-    const searchResponse = await sendToSearchTheIndex(query);
+      setLoading(true);
+      try {
+        console.log("existing data is:", existingData);
+        const searchResponse = await sendToSearchTheIndex(query);
         console.log("response to searchTheIndex in frontend is:", searchResponse);
         const responseText = searchResponse.text;
         console.log("responseText is:", responseText);
         setResponse(responseText);
+      } catch (err) {
+        setError("Search failed. Please try again.");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
     }
   }
 
   async function handleFolderUpload(e) {
     e.preventDefault();
 
-    if (folderFiles.length === 0) {
+    if (!folderFiles || folderFiles.length === 0) {
       setError("Please upload at least one PDF file.");
       return;
     }
     setLoading(true);
+    setUploadProgress(0);
+    setUploadProgressMessage('Preparing PDFs...');
 
     try {
       // Create a FormData object to send the files
@@ -212,19 +186,63 @@ function App() {
         throw new Error("Failed to translate the PDFs");
       }
 
-      // Parse the response as JSON
-      const data = await response.json();
-      console.log("data returned to frontend is:", data);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalPayload = null;
 
-      // Update the translated text state
-      setFolderUploadText(data || "Translation successful. Check backend for full results.");
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+
+          const progress = JSON.parse(line);
+
+          if (progress.phase === 'error') {
+            throw new Error(progress.error || "Failed to process files");
+          }
+
+          setUploadProgress(progress.percent ?? 0);
+          setUploadProgressMessage(progress.message || '');
+
+          if (progress.phase === 'complete') {
+            finalPayload = progress;
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        const progress = JSON.parse(buffer);
+        setUploadProgress(progress.percent ?? 0);
+        setUploadProgressMessage(progress.message || '');
+
+        if (progress.phase === 'complete') {
+          finalPayload = progress;
+        }
+      }
+
+      setFolderUploadText(finalPayload?.message || "New files added successfully");
       setFolderUpload(true);
+      setError('');
       //setExistingData(data);
     } catch (err) {
       setError("Failed to translate the PDFs. Please try again.");
       console.error(err);
     } finally {
       setLoading(false);
+      setUploadProgress(null);
+      setUploadProgressMessage('');
     }
 
     
@@ -236,52 +254,82 @@ function App() {
   async function handleFileChange(e) {
     const selectedFiles = Array.from(e.target.files);
     setFolderFiles(selectedFiles);
+    setFolderUpload(false);
+    setUploadProgress(null);
+    setUploadProgressMessage('');
+    setError('');
   }
   
 
   return (
     <div className="App">
-      <header className="App-header">
-        <h2>ask aetius</h2>
-        <input
-          type="file"
-          accept=".pdf"
-          multiple // Allow multiple files to be selected
-          onChange={handleFileChange}
-        />
-        <button onClick={handleFolderUpload}>{loading ? "uploading...": folderUpload ? "uploaded": "upload"}</button>
-        <h3>add Query</h3>
-        <label>enter query</label>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} />
-        <button disabled={!folderUpload} onClick={handleRAG}>search</button>
-        <button disabled={!folderUpload} onClick={searchIndexDirectly}>search directly</button>
-        {/*{folderUploadText.length > 0 && folderUploadText.map((item) => (
-          <p>{item.text}</p> 
-        ))}*/}
-        {response && (
-          <>
-          <h3>aetius says:</h3>
-          <p>{response}</p>
-          </>
-        )}
-      </header>
-      <div>
-        <h3>add indexName</h3>
-        <label>enter indexName</label>
-        <input value={indexName} onChange={(e) => setIndexName(e.target.value)} />
-      </div>
-      <div>
-        {indexName && (
-          <p>{indexName}</p>
-        )}
-        {/*{existingData && existingData.map((dat) => (
-          <>
-            <p>{dat.id}</p>
-            <p>{dat.text}</p>
-          </>
-        ))}*/}
-         
-      </div>
+      <main className="app-shell">
+        <section className="brand-lockup">
+          <p className="eyebrow">RAG MVP</p>
+          <h1>askAetius</h1>
+        </section>
+
+        <section className={`answer-panel ${response || loading ? "has-answer" : ""}`} aria-live="polite">
+          {loading && uploadProgress !== null ? (
+            <div className="upload-progress" role="status" aria-label="Upload progress">
+              <div className="progress-meta">
+                <span>{uploadProgressMessage || 'Indexing PDFs...'}</span>
+                <strong>{uploadProgress}%</strong>
+              </div>
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
+              </div>
+            </div>
+          ) : loading ? (
+            <div className="answer-loading" role="status" aria-label="Loading response">
+              <span className="spinner" aria-hidden="true"></span>
+            </div>
+          ) : response ? (
+            <p className="answer-text">{response}</p>
+          ) : (
+            <p className="empty-state">
+              Upload PDFs, ask a question, and Aetius will answer from the current index.
+            </p>
+          )}
+        </section>
+
+        <section className="search-dock" aria-label="Ask Aetius controls">
+          <div className="dock-status">
+            <span>{folderFiles ? `${folderFiles.length} PDF${folderFiles.length === 1 ? "" : "s"}` : "No PDFs selected"}</span>
+            <span>{folderUpload ? "Uploaded" : "Static index ready"}</span>
+          </div>
+
+          <textarea
+            id="query-input"
+            className="query-input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Ask Aetius..."
+            rows="2"
+          />
+
+          <div className="dock-actions">
+            <label className="file-button">
+              <input
+                type="file"
+                accept=".pdf"
+                multiple
+                onChange={handleFileChange}
+              />
+              <span>Choose PDFs</span>
+            </label>
+            <button className="secondary-action" onClick={handleFolderUpload}>
+              {loading ? "Uploading..." : folderUpload ? "Uploaded" : "Upload"}
+            </button>
+            <button className="primary-action" disabled={!query || loading} onClick={searchIndexDirectly}>
+              Search
+            </button>
+
+          </div>
+
+          {error && <p className="error-message">{error}</p>}
+        </section>
+      </main>
     </div>
   );
 }

@@ -3,7 +3,6 @@ const express = require('express');
 const app = express();
 const cors = require('cors');
 const { Pinecone, PineconeClient } = require("@pinecone-database/pinecone");
-const OpenAI = require("openai");
 const { CohereClient } = require('cohere-ai');
 const natural = require('natural');
 require('dotenv').config();
@@ -29,10 +28,7 @@ const pc = new Pinecone({
 
   const cohere = new CohereClient({ apiKey: process.env.CO_API_KEY });
 
-  const openai = new OpenAI({
-    apiKey: apiKey  // Replace with your OpenAI API key
-  });
-
+  
 
 const indexName = 'ampleforth';
 
@@ -42,15 +38,34 @@ index = pc.Index(indexName);
 const upload = multer({ dest: "uploads/" });
 
 app.post('/convert-folderpdfs-text', upload.any(), async (req, res, next) => {
-  console.log("req is:", req);
+
+  function sendProgress(payload) {
+    res.write(`${JSON.stringify(payload)}\n`);
+  }
+
+  function handleEmbeddingProgress(progress) {
+    sendProgress({
+      ...progress,
+      percent: 10 + Math.round(progress.percent * 0.85),
+      message: `Embedding batch ${progress.currentBatch}/${progress.totalBatches}`
+    });
+  }
+
   try {
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+
     const files = req.files; // Uploaded files
+    console.log(`received ${files ? files.length : 0} uploaded file(s)`);
+
     if (!files || files.length === 0) {
       return res.status(400).json({ error: "No files uploaded" });
     }
 
     
     const processedData = [];
+    sendProgress({ phase: 'extracting', percent: 0, message: 'Extracting PDF text' });
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -67,15 +82,37 @@ app.post('/convert-folderpdfs-text', upload.any(), async (req, res, next) => {
       const dataToAdd = { /*id: vectorId,*/ text: pdfText.text };
       processedData.push(dataToAdd);
 
-      console.log("processed data before being returned form backend is:", processedData);
+      console.log(`processed ${file.originalname || file.filename}: ${pdfText.text.length} character(s) extracted`);
+      sendProgress({
+        phase: 'extracting',
+        percent: Math.round(((i + 1) / files.length) * 10),
+        file: file.originalname || file.filename,
+        message: `Extracted ${i + 1}/${files.length} PDF(s)`
+      });
+
+      
       
     }
 
-    // Respond with processed data
-    res.json(processedData);
+    const response = await generateVectors(processedData, handleEmbeddingProgress);
+
+    console.log("generateVectors response is:", response);
+    
+      sendProgress({
+        phase: 'complete',
+        percent: 100,
+        message: "New files added successfully",
+        ...response
+      });
+      res.end();
+
   } catch (err) {
     console.error("Error processing files:", err);
-    res.status(500).json({ error: "Failed to process files" });
+    if (!res.headersSent) {
+      res.status(500);
+    }
+    sendProgress({ phase: 'error', percent: 0, error: "Failed to process files" });
+    res.end();
   }
 })
 
@@ -84,23 +121,9 @@ app.post('/convert-folderpdfs-text', upload.any(), async (req, res, next) => {
 
 
 
-app.post('/generateVectors', async (req, res, next) => {
-  
-    //console.log("recieved sendToGenerateVectors request is:", req);
-    //console.log("req.body is:", req.body);
-    
-    const data = req.body;
-    console.log("data at generateVectors endpoint is:", data);
-    
-    const response = await generateVectors(data);
-    console.log("response is:", response);
-    
-    res.status(200).send("vectors generated successfully");
-
-
-})
 
 app.post('/searchTheIndex', async (req, res, next) => {
+  try {
 
     const data = req.body;
     console.log("data in searchTheIndex backend is:", data);
@@ -114,6 +137,10 @@ app.post('/searchTheIndex', async (req, res, next) => {
     console.log("response is:", response.text);
 
     res.status(200).send(response);
+  } catch (err) {
+    console.error("Error searching index:", err);
+    res.status(500).json({ error: "Failed to search index" });
+  }
 })
 
 
